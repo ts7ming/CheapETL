@@ -1,7 +1,17 @@
 import os
-
 from pyqueen import DataSource
-from core.utils import decrypt, encrypt
+from cryptography.fernet import Fernet
+
+# --------------------------  加密解码  --------------------------
+def encrypt(text, key):
+    cipher = Fernet(key.encode('utf-8'))
+    return cipher.encrypt(text.encode('utf-8')).decode('utf-8')
+
+
+def decrypt(text, key):
+    cipher = Fernet(key.encode('utf-8'))
+    return cipher.decrypt(text).decode('utf-8')
+
 
 # --------------------------  配置优先级  --------------------------
 # 优先取 settings.py 的值, 如果没有尝试从数据库配置表获取
@@ -22,6 +32,8 @@ T_JOB_LOG = getattr(settings, 'T_JOB_LOG', 'etl_log')
 T_CHECK = getattr(settings, 'T_CHECK', 'etl_job_check')
 T_SYNC = getattr(settings, 'T_SYNC', 'etl_job_sync')
 T_PY = getattr(settings, 'T_PY', 'etl_job_py')
+T_FLINK = getattr(settings, 'T_FLINK', 'etl_job_flink')
+T_FLINK_TRACKING = getattr(settings, 'T_FLINK_TRACKING', 'etl_job_flink_tracking')
 T_SQL = getattr(settings, 'T_SQL', 'etl_job_sql')
 T_MESSAGE = getattr(settings, 'T_MESSAGE', 'etl_robot_message')
 T_DICT = getattr(settings, 'T_DICT', 'etl_dict')
@@ -34,24 +46,33 @@ WORK_DIR = getattr(settings, 'WORK_DIR', os.path.dirname(os.path.dirname(os.path
 ENVIRONMENT_VARIABLE = getattr(settings, 'ENVIRONMENT_VARIABLE', [])
 FINEREPORT_DIR = getattr(settings, 'FINEREPORT_DIR', None)
 DATAX_PY = getattr(settings, 'DATAX_PY', None)
+PY_PATH = getattr(settings, 'PY_PATH', 'python3')
+FLINK_CONFIG = getattr(settings, 'FLINK_CONFIG', None)
+EXECUTOR = getattr(settings, 'EXECUTOR', '0')
+PARALLELISM = getattr(settings, 'PARALLELISM', '1')
+VERSION = getattr(settings, 'VERSION', 'PROD')
 
 # --------------------------  数据连接  ----------------------------
 if hasattr(settings, 'DATABASES'):
     DATABASES = settings.DATABASES
 else:
     DATABASES = {}
-    if ds_cfg is not None:
-        sql = f'select server_id,conn_type,host,username,password,port,db_name from {T_SERVER}'
-        df = ds_cfg.read_sql(sql)
-        for server_id, conn_type, host, username, password, port, db_name in df.values:
-            DATABASES[str(server_id)] = {
-                'conn_type': conn_type,
-                'host': host,
-                'username': username,
-                'password': decrypt(password, SECRET_KEY),
-                'port': port,
-                'db_name': db_name
-            }
+if len(DATABASES)==0 and ds_cfg is not None:
+    tmp_db = {}
+    sql = f'select server_id,conn_type,host,username,password,port,db_name from {T_SERVER}'
+    df = ds_cfg.read_sql(sql)
+    for server_id, conn_type, host, username, password, port, db_name in df.values:
+        tmp_db[str(server_id)] = {
+            'conn_type': conn_type,
+            'host': host,
+            'username': username,
+            'password': decrypt(password, SECRET_KEY),
+            'port': port,
+            'db_name': db_name
+        }
+    for k,v in tmp_db.items():
+        if k not in DATABASES.keys():
+            DATABASES[k]=v
 
 # --------------------------  通知机器人  ----------------------------
 if hasattr(settings, 'ROBOTS'):

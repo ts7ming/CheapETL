@@ -1,21 +1,27 @@
 from pyqueen import DataSource, TimeKit, Dingtalk
 import time
+
+import requests
 from config import (
+    ds_cfg,
     DATABASES,
     ROBOTS,
+    EXECUTOR,
     T_JOB,
     T_JOB_LOG,
     T_CHECK,
     T_SYNC,
     T_PY,
+    T_FLINK,
+    T_FLINK_TRACKING,
     T_SQL,
     T_MESSAGE,
     T_RPT_PUB,
-    T_USER_REQUEST
+    T_USER_REQUEST,
+    FLINK_CONFIG
 )
 
-ds = DataSource(**DATABASES['1001'])
-ds.set_db('dw')
+ds = ds_cfg
 
 
 class Repo:
@@ -25,6 +31,11 @@ class Repo:
         r_ds.auto_server_id = str(server_id)
         return r_ds
 
+    @staticmethod
+    def get_cfg(cfg_key):
+        sql = f"select cfg_value from etl_dict where cfg_key = '{cfg_key}'"
+        return ds.get_value(sql)
+    
     @staticmethod
     def get_datax_reader(server_id, db_name, sql):
         server_cfg = DATABASES[str(server_id)]
@@ -51,8 +62,13 @@ class Repo:
         return cfg
 
     @staticmethod
-    def get_datax_writer(server_id, before_write, db_name, table_name, columns=["*"]):
+    def get_datax_writer(server_id, before_write, after_write, db_name, table_name, columns=["*"]):
+        if str(before_write) == 'None' or before_write is None:
+            before_write= ''
+        if str(after_write) == 'None' or after_write is None:
+            after_write= ''
         server_cfg = DATABASES[str(server_id)]
+        port = str(server_cfg['port'])
         if server_cfg['conn_type'] == 'oracle':
             writer = 'oraclewriter'
             url = "jdbc:oracle:thin:@{host}:{port}:{db_name}"
@@ -62,26 +78,45 @@ class Repo:
         elif server_cfg['conn_type'] == 'mysql':
             writer = 'mysqlwriter'
             url = "jdbc:mysql://{host}:{port}/{db_name}?useUnicode=true&characterEncoding=utf8"
+        elif server_cfg['conn_type'] == 'doris':
+            writer = 'doriswriter'
+            url = "jdbc:mysql://{host}:{port}/{db_name}?useUnicode=true&characterEncoding=utf8"
+            port = str(server_cfg['port']).split(',')[0]
+            port_be = str(server_cfg['port']).split(',')[1]
         else:
             raise Exception('未知类型')
-        url = url.format(host=server_cfg['host'], port=server_cfg['port'], db_name=db_name)
-        cfg = {
-            "name": writer,
-            "parameter": {
+        url = url.format(host=server_cfg['host'], port=port, db_name=db_name)
+        connection = [{"jdbcUrl": url, "table": [table_name]}]
+        parameter = {
+            "username": server_cfg['username'],
+            "password": server_cfg['password'],
+            "column": columns,
+            "preSql": [before_write],
+            "postSql": [after_write],
+            "connection": connection
+        }
+        if server_cfg['conn_type'] == 'doris':
+            parameter = {
                 "username": server_cfg['username'],
                 "password": server_cfg['password'],
                 "column": columns,
                 "preSql": [before_write],
-                "connection": [{"jdbcUrl": url, "table": [table_name]}]
+                "connection": [{"jdbcUrl": url, "table": [table_name],"selectedDatabase": db_name}],
+                "loadUrl": [server_cfg['host']+':'+port_be],
             }
+        cfg = {
+            "name": writer,
+            "parameter": parameter
         }
         return cfg
 
     @staticmethod
     def msg_log(robot_id, text):
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
         try:
             text = text.replace("'", '"')
-            sql = f'''insert into {T_MESSAGE} (robot_id, send_time, text) VALUES ('{robot_id}', getdate(), '{text}')'''
+            sql = f'''insert into {T_MESSAGE} (robot_id, send_time, text) VALUES ('{robot_id}', '{now}', '{text}')'''
             ds.exe_sql(sql)
         except Exception as e:
             print(e)
@@ -118,10 +153,11 @@ class Repo:
             sql = f'''
             SELECT id, job_name, job_type, job_template, job_params, job_depend, message_robot, job_log, job_message, job_on_error
             FROM {T_JOB}
-            WHERE (job_status = 1 and execution_status = 99)
+            WHERE (job_executor = {EXECUTOR} and job_status = 1 and (execution_status = 99 or (execution_status=-1 and error_count<retry_count)))
             or (
-                job_status = 1 
-                and execution_status = 0
+                job_executor = {EXECUTOR}
+                and job_status = 1 
+                and (execution_status = 0 or (execution_status=-1 and error_count<retry_count))
                 and (job_schedule_month='*' or concat(',',job_schedule_month,',') like '%{cur_month}%')
                 and (job_schedule_week='*' or concat(',',job_schedule_week,',') like '%{cur_week}%')
                 and (job_schedule_day='*' or concat(',',job_schedule_day,',') like '%{cur_day}%')
@@ -135,13 +171,16 @@ class Repo:
             SELECT id, job_name, job_type, job_template, job_params, job_depend, message_robot, job_log, job_message, job_on_error
             FROM {T_JOB}
             WHERE id in ({id_list_str})
+            AND job_executor = {EXECUTOR}
             '''
         df = ds.read_sql(sql)
         return df.to_dict('records')
 
     @staticmethod
     def register_user_request(username, func_name):
-        sql = f"insert into {T_USER_REQUEST} (username,request_time,func_name) select '{username}' as username, getdate() as request_time, '{func_name}' as func_name"
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        sql = f"insert into {T_USER_REQUEST} (username,request_time,func_name) select '{username}' as username, '{now}' as request_time, '{func_name}' as func_name"
         ds.exe_sql(sql)
 
     @staticmethod
@@ -149,7 +188,7 @@ class Repo:
         sql = f'''
         SELECT id, job_name, job_type, job_template, job_params, job_depend, message_robot, job_log, job_message, job_on_error
         FROM {T_JOB}
-        WHERE execution_status in (0, 99)
+        WHERE (execution_status in (0, 99) or (execution_status=-1 and error_count<retry_count))
         and job_status = 1
         and job_depend in ({id_list_str})
         '''
@@ -164,25 +203,94 @@ class Repo:
 
     @staticmethod
     def register_job_start(job_id):
-        sql1 = f'update {T_JOB} set execution_status=2, last_execution_time=getdate() where id = {job_id}'
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        sql1 = f"update {T_JOB} set execution_status=2, last_execution_time='{now}' where id = {job_id}"
         ds.exe_sql(sql1)
 
     @staticmethod
     def register_job_end(job_id):
-        sql1 = f'update {T_JOB} set execution_status=0 where id = {job_id}'
+        sql1 = f'update {T_JOB} set execution_status=0, error_count=0 where id = {job_id}'
         ds.exe_sql(sql1)
 
     @staticmethod
     def register_job_error(job_id):
-        sql = f'update {T_JOB} set execution_status=-1 where id = {job_id}'
+        sql = f'update {T_JOB} set execution_status=-1, error_count=error_count+1 where id = {job_id}'
         ds.exe_sql(sql)
 
     @staticmethod
+    def register_flink_job(id, job_id, job_template_id, flink_job_id, submit_cmd):
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        sql = f'''
+        insert into {T_FLINK_TRACKING} (id,job_id,job_template_id,flink_job_id,job_status, submit_cmd, submit_time, retry_count) 
+        values('{id}', '{job_id}', '{job_template_id}', '{flink_job_id}',0,'{submit_cmd}','{now}',0)
+        '''
+        ds.exe_sql(sql)
+
+    @staticmethod
+    def register_flink_tracking():
+        sql = f'update {T_JOB} set execution_status=99 where id=7777'
+        ds.exe_sql(sql)
+
+    @staticmethod
+    def update_flink_job_finish(id, status, duration):
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        if str(status) == '3':
+            sql = f"update {T_FLINK_TRACKING} set job_status = {status}, last_track_time='{now}', duration='{duration}', finish_time='{now}' where id='{id}'"
+        else:
+            sql = f"update {T_FLINK_TRACKING} set job_status = {status}, last_track_time='{now}', duration='{duration}' where id='{id}'"
+        ds.exe_sql(sql)
+
+    @staticmethod
+    def update_flink_job_error(id):
+        sql = f"update {T_FLINK_TRACKING} set retry_count = retry_count+1 where id='{id}'"
+        ds.exe_sql(sql)
+
+    @staticmethod
+    def get_flink_job_running(job_id=None):
+        if job_id is None:
+            sql = f"select id, flink_job_id, submit_cmd from {T_FLINK_TRACKING} where job_status in (0,1,2) and retry_count<2"
+        else:
+            sql = f"select id, flink_job_id, submit_cmd from {T_FLINK_TRACKING} where job_id = {job_id} and job_status in (0,1,2) and retry_count<2"
+        df = ds.read_sql(sql)
+        return df
+
+    @staticmethod
+    def get_flink_job_status(flink_job_id):
+        flink_job_status = {
+            'CREATED':1,
+            'RUNNING':2,
+            'FAILING':-1,
+            'FAILED':-1,
+            'CANCELLING':-1,
+            'CANCELED':-1,
+            'FINISHED':3,
+            'RESTARTING':-1,
+            'SUSPENDED':-1
+        }
+        rest_url = FLINK_CONFIG['flink_rest_url']
+        url = f"{rest_url}/jobs/{flink_job_id}"
+        info = None
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            info = resp.json()
+        except requests.RequestException as e:
+            return -1, -1
+        state = str(info.get("state")).upper()
+        duration = info.get("duration")
+        return flink_job_status[state], duration
+
+    @staticmethod
     def job_log_start(log_id, job_id, run_params_str):
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
         try:
             sql = f'''
             insert into {T_JOB_LOG} (id, job_id, execution_status, start_time, job_params) 
-            select '{log_id}' as log_id, id as job_id, 2 as execution_status, getdate() as start_time, '{run_params_str}' as job_params
+            select '{log_id}' as log_id, id as job_id, 2 as execution_status, '{now}' as start_time, '{run_params_str}' as job_params
             from {T_JOB} 
             where id = {job_id}
             '''
@@ -191,13 +299,25 @@ class Repo:
             print(e)
 
     @staticmethod
+    def job_log_start_new(log_id, job_id, run_params_str):
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        try:
+            sql = f"insert into {T_JOB_LOG} (id, job_id, execution_status, start_time, job_params) values ('{log_id}','{job_id}',2,'{now}','{run_params_str}')"
+            ds.exe_sql(sql)
+        except Exception as e:
+            print(e)
+
+    @staticmethod
     def job_log_end(log_id, status, msg):
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
         try:
             if msg is None:
-                sql2 = f'''update {T_JOB_LOG} set execution_status={status}, end_time = getdate() where id ='{log_id}' '''
+                sql2 = f'''update {T_JOB_LOG} set execution_status={status}, end_time = '{now}' where id ='{log_id}' '''
             else:
                 msg = str(msg).replace("'", "''").replace('\n', '    ')
-                sql2 = f'''update {T_JOB_LOG} set execution_status={status}, message='{msg}', end_time = getdate() where id ='{log_id}' '''
+                sql2 = f'''update {T_JOB_LOG} set execution_status={status}, message='{msg}', end_time = '{now}' where id ='{log_id}' '''
             ds.exe_sql(sql2)
         except Exception as e:
             print(e)
@@ -210,6 +330,14 @@ class Repo:
         WHERE id in ({id_list_str})
         '''
         df = ds.read_sql(sql)
+
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        try:
+            register_sql = f"update {T_CHECK} set last_execution_time='{now}' WHERE id in ({id_list_str})"
+            ds.exe_sql(register_sql)
+        except Exception as e:
+            print("更新子任务调用记录失败: "+str(e))
         return df.to_dict('records')
 
     @staticmethod
@@ -224,7 +352,7 @@ class Repo:
     @staticmethod
     def get_sync_job(id_list_str):
         sql = f'''
-        SELECT id, from_server, from_db, from_sql, to_server, to_db, to_table, to_columns, before_write
+        SELECT id, ifnull(param_server_id,0) as param_server_id,param_db_name,param_sql,from_server_id,from_db_name, from_sql, to_server_id, to_db_name, to_table, to_columns, before_write, after_write
         FROM {T_SYNC}
         WHERE id in ({id_list_str})
         '''
@@ -232,6 +360,14 @@ class Repo:
         records = df.to_dict('records')
         id_list = [id.strip() for id in id_list_str.split(',')]
         ordered_records = sorted(records, key=lambda x: id_list.index(str(x['id'])))
+
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        try:
+            register_sql = f"update {T_SYNC} set last_execution_time='{now}' WHERE id in ({id_list_str})"
+            ds.exe_sql(register_sql)
+        except Exception as e:
+            print("更新子任务调用记录失败: "+str(e))
         return ordered_records
 
     @staticmethod
@@ -245,8 +381,47 @@ class Repo:
         records = df.to_dict('records')
         id_list = [id.strip() for id in id_list_str.split(',')]
         ordered_records = sorted(records, key=lambda x: id_list.index(str(x['id'])))
+
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        try:
+            register_sql = f"update {T_PY} set last_execution_time='{now}' WHERE id in ({id_list_str})"
+            ds.exe_sql(register_sql)
+        except Exception as e:
+            print("更新子任务调用记录失败: "+str(e))
+
         return ordered_records
 
+    @staticmethod
+    def get_flink_job(id_list_str):
+        sql = f'''
+        SELECT id, job_sql, ifnull(param_server_id,0) as param_server_id, param_db_name, param_sql
+        FROM {T_FLINK}
+        WHERE id in ({id_list_str})
+        '''
+        df = ds.read_sql(sql)
+        records = df.to_dict('records')
+        id_list = [id.strip() for id in id_list_str.split(',')]
+        ordered_records = sorted(records, key=lambda x: id_list.index(str(x['id'])))
+
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        try:
+            register_sql = f"update {T_FLINK} set last_execution_time='{now}' WHERE id in ({id_list_str})"
+            ds.exe_sql(register_sql)
+        except Exception as e:
+            print("更新子任务调用记录失败: "+str(e))
+        return ordered_records
+    
+    @staticmethod
+    def get_job_param(server_id, db_name, sql_text):
+        tmp_ds = Repo.get_ds(server_id)
+        tmp_ds.set_db(db_name)
+        df = tmp_ds.read_sql(sql_text)
+        df = df.head(1)
+        param = df.to_dict('records')
+        return param
+    
     @staticmethod
     def get_sql_job(id_list_str):
         sql = f'''
@@ -258,6 +433,16 @@ class Repo:
         records = df.to_dict('records')
         id_list = [id.strip() for id in id_list_str.split(',')]
         ordered_records = sorted(records, key=lambda x: id_list.index(str(x['id'])))
+
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        try:
+            register_sql = f"update {T_SQL} set last_execution_time='{now}' WHERE id in ({id_list_str})"
+            ds.exe_sql(register_sql)
+        except Exception as e:
+            print("更新子任务调用记录失败: "+str(e))
+
+
         return ordered_records
 
     @staticmethod
@@ -268,28 +453,47 @@ class Repo:
         return df
 
     @staticmethod
-    def exe_sync_sql(server_id, db_name, sql_text, sql_params):
-        ds_sync = DataSource(**DATABASES[str(server_id)])
-        ds_sync.set_db(db_name)
-        ds_sync.exe_sql(sql_text.format(**sql_params))
-
-    @staticmethod
     def write_sync_data(df, server_id, db_name, table_name):
         ds_sync = DataSource(**DATABASES[str(server_id)])
+        if ds_sync.conn_type == 'oracle':
+            info = db_name.split('.')
+            schema = info[0]
+            db_name = info[1]
         ds_sync.set_db(db_name)
         if df is not None:
-            ds_sync.to_db(df, table_name)
+            if ds_sync.conn_type == 'oracle':
+                ds_sync.to_db(df, table_name, schema=schema)
+            else:
+                ds_sync.to_db(df, table_name)
 
     @staticmethod
     def exe_sql_job(server_id, db_name, sql_text, sql_params):
         ds = DataSource(**DATABASES[str(server_id)])
         ds.set_db(db_name)
-        # print(sql_text.format(**sql_params))
-        ds.exe_sql(sql_text.format(**sql_params))
+        if sql_params is None:
+            real_sql = sql_text
+        else:
+            real_sql = sql_text.format(**sql_params)
+
+        if '----------' in str(real_sql):
+            ds.set('keep_conn',True)
+            sql_list = real_sql.split('----------')
+            for sub_sql in sql_list:
+                ds.exe_sql(sub_sql)
+            try:
+                ds.close_conn()
+            except:
+                pass
+        else:
+            ds.exe_sql(real_sql)
+        
+        return real_sql
 
     @staticmethod
     def update_rpt_publish(rpt_id, rpt_period):
-        sql = f'update {T_RPT_PUB} set published=1,etl_time=getdate() where rpt_id={rpt_id} and rpt_period={rpt_period}'
+        tk = TimeKit()
+        now = tk.int2str(tk.now)
+        sql = f"update {T_RPT_PUB} set published=1,etl_time='{now}' where rpt_id={rpt_id} and rpt_period={rpt_period}"
         ds.exe_sql(sql)
 
     @staticmethod
