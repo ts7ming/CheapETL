@@ -1,8 +1,8 @@
 import json
 import sys
 import time
-from core.job_executor import JobExecutor
-from core import repo
+from job_executor import JobExecutor
+from models import Repo as repo
 import logging
 
 
@@ -16,21 +16,19 @@ def main(sql_id, run_params):
     log_id = str(time.time_ns())
     try:
         run_params_str = '' if run_params is None else json.dumps(run_params, ensure_ascii=False)
-        repo.job_log_start_new(log_id, sql_id, run_params_str)
+        repo.job_log_start(log_id, sql_id, run_params_str)
         je = JobExecutor(sql_id, 'sql', str(sql_id), run_params, 1)
         code, msg = je.exe()
     except Exception as e:
-        repo.admin_msg(text='SQL任务 ' + str(sql_id) + '\n执行出错\n\n' + str(e)[0:300])
+        # repo.admin_msg(text='SQL任务 ' + str(sql_id) + '\n执行出错\n\n' + str(e)[0:300])
         logger.error(str(e))
         return None
 
     if code == 0:
-        repo.register_job_end(sql_id)
         repo.job_log_end(log_id, 3, msg)
     else:
-        repo.register_job_error(sql_id)
         repo.job_log_end(log_id, -1, msg)
-        repo.admin_msg(text='SQL任务 ' + str(sql_id) + '\状态错误\n\n' + str(msg)[0:300])
+        # repo.admin_msg(text='SQL任务 ' + str(sql_id) + '\状态错误\n\n' + str(msg)[0:300])
         logger.error(str(msg))
 
 if __name__ == '__main__':

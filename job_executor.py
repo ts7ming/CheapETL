@@ -4,11 +4,11 @@ import re
 import subprocess
 import time
 import os
-from config import WORK_DIR, DATAX_PY, PY_PATH, FLINK_CONFIG, DATABASES
-from core import repo, print_log
-from pyqueen import DataSource
-from datetime import datetime
-from jinja2 import Template
+from settings import WORK_DIR, DATAX_PY, PY_PATH, DATABASES
+from models import Repo as repo
+# from pyqueen import DataSource
+# from datetime import datetime
+# from jinja2 import Template
 
 class JobExecutor:
     def __init__(self, job_id, job_type, job_template, run_params, job_log):
@@ -45,41 +45,41 @@ class JobExecutor:
             param_list.append(dict())
         return param_list
 
-    def __import_py(self, py_path):
-        if not os.path.exists(py_path):
-            raise FileNotFoundError(f"脚本不存在: {py_path}")
-        module_name = os.path.basename(py_path).split(".")[0]
-        spec = importlib.util.spec_from_file_location(module_name, py_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        if self.job_log:
-            try:
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if isinstance(attr, DataSource):
-                        attr.record_log(field_list=['func_name', 'start_time', 'end_time', 'sql_text', 'server_id', 'db_name', 'table_name'])
-            except Exception as e:
-                print_log('日志设置出错: ' + str(e))
-        return module
+    # def __import_py(self, py_path):
+    #     if not os.path.exists(py_path):
+    #         raise FileNotFoundError(f"脚本不存在: {py_path}")
+    #     module_name = os.path.basename(py_path).split(".")[0]
+    #     spec = importlib.util.spec_from_file_location(module_name, py_path)
+    #     module = importlib.util.module_from_spec(spec)
+    #     spec.loader.exec_module(module)
+    #     if self.job_log:
+    #         try:
+    #             for attr_name in dir(module):
+    #                 attr = getattr(module, attr_name)
+    #                 if isinstance(attr, DataSource):
+    #                     attr.record_log(field_list=['func_name', 'start_time', 'end_time', 'sql_text', 'server_id', 'db_name', 'table_name'])
+    #         except Exception as e:
+    #             print('日志设置出错: ' + str(e))
+    #     return module
 
-    def __exe_py(self):
-        e_log = {}
-        for j in self.job_list:
-            module = self.__import_py(os.path.join(WORK_DIR, j['py_path']))
-            sub_log = []
-            for p in self.param_list:
-                module.main(**p)
-                if self.job_log:
-                    try:
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if isinstance(attr, DataSource):
-                                sub_log.extend(attr.export_log())
-                    except Exception as e:
-                        print_log(e)
-                        sub_log.append({'status': '日志收集出错', 'message': str(e)})
-            e_log[j['py_path']] = sub_log
-        return e_log
+    # def __exe_py(self):
+    #     e_log = {}
+    #     for j in self.job_list:
+    #         module = self.__import_py(os.path.join(WORK_DIR, j['py_path']))
+    #         sub_log = []
+    #         for p in self.param_list:
+    #             module.main(**p)
+    #             if self.job_log:
+    #                 try:
+    #                     for attr_name in dir(module):
+    #                         attr = getattr(module, attr_name)
+    #                         if isinstance(attr, DataSource):
+    #                             sub_log.extend(attr.export_log())
+    #                 except Exception as e:
+    #                     print(e)
+    #                     sub_log.append({'status': '日志收集出错', 'message': str(e)})
+    #         e_log[j['py_path']] = sub_log
+    #     return e_log
 
     def __exe_sync_pd(self):
         e_log = {}
@@ -109,7 +109,7 @@ class JobExecutor:
                         sync_rows = 'null' if df is None else len(df)
                         sub_log.append({'sync_param': str(p), 'sync_rows': str(sync_rows)})
                     except Exception as e:
-                        print_log(e)
+                        print(e)
                         sub_log.append({'status': '日志收集出错', 'message': str(e)})
             e_log[j['id']] = sub_log
         return e_log
@@ -154,7 +154,7 @@ class JobExecutor:
                         if read_match:
                             read_count = int(read_match.group(1))
                 except Exception as e:
-                    print_log(f"读取DataX输出时出错: {e}")
+                    print(f"读取DataX输出时出错: {e}")
                 return_code = process.wait()
                 if self.job_log:
                     if return_code == 0:
@@ -162,10 +162,10 @@ class JobExecutor:
                         try:
                             os.remove(tmp_json_path)
                         except:
-                            print_log(f"{tmp_json_path} 删除失败")
+                            print(f"{tmp_json_path} 删除失败")
                     else:
                         sub_log.append({'sync_param': p, 'result': 'datax执行失败'+str(process.stdout)})
-                        print_log(process.stdout) #报错写入 /log/yyyymm.log
+                        print(process.stdout) #报错写入 /log/yyyymm.log
                         raise Exception('datax执行失败')
             e_log[j['id']] = sub_log
         return e_log
@@ -180,7 +180,7 @@ class JobExecutor:
                     try:
                         sub_log.append({'sql_param': p,'sql_text':real_sql})
                     except Exception as e:
-                        print_log(e)
+                        print(e)
                         sub_log.append({'status': '日志收集出错', 'message': str(e)})
             e_log[j['id']] = sub_log
         return e_log
@@ -199,86 +199,86 @@ class JobExecutor:
                     try:
                         sub_log.append({'check_param': p, 'check_result': result_status})
                     except Exception as e:
-                        print_log(e)
+                        print(e)
                         sub_log.append({'status': '日志收集出错', 'message': str(e)})
             e_log[j['id']] = sub_log
         return e_log
 
-    def __submit_flink(self, job_sql, params=None):
-        info = ''
-        m = re.search(r"(?i)set\s+'pipeline\.name'\s*=\s*'([^']+)'", job_sql)
-        if m:
-            job_name = m.group(1)
-        else:
-            job_name = 'temp'
-        if params is None or params == {}:
-            result = Template(job_sql).render(db=DATABASES)
-        else:
-            result = Template(job_sql).render(db=DATABASES,params=params)
+    # def __submit_flink(self, job_sql, params=None):
+    #     info = ''
+    #     m = re.search(r"(?i)set\s+'pipeline\.name'\s*=\s*'([^']+)'", job_sql)
+    #     if m:
+    #         job_name = m.group(1)
+    #     else:
+    #         job_name = 'temp'
+    #     if params is None or params == {}:
+    #         result = Template(job_sql).render(db=DATABASES)
+    #     else:
+    #         result = Template(job_sql).render(db=DATABASES,params=params)
 
-        sql_client_rel = FLINK_CONFIG.get('sql_client_path')
-        flink_home = FLINK_CONFIG.get('flink_home')
-        sql_client_exec = None
-        if flink_home and sql_client_rel:
-            candidate = os.path.join(flink_home, sql_client_rel)
-            candidate = os.path.normpath(candidate)
-            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
-                sql_client_exec = candidate
-        temp_sql = None
-        log_dir = os.path.join(os.getcwd(), 'log/flink_job/')
-        os.makedirs(log_dir, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        filename = f"{job_name}_{timestamp}.sql"
-        temp_sql = os.path.join(log_dir, filename)
-        with open(temp_sql, 'w', encoding='utf-8') as f:
-            f.write(result)
-        if sql_client_exec is None:
-            sql_client_exec = 'not flink'
-        cmd = [sql_client_exec, '-f', temp_sql]
-        print("执行命令: " + ' '.join(cmd))
-        flink_job_id = 'init'
-        if self.__mode == 'prod':
-            proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            info+="执行命令: " + ' '.join(cmd) + '\n'
-            info+="stdout: " + proc.stderr+ '\n'
-            print_log(info)
-            try:
-                job_id_match = re.search(r"Job ID:\s+([a-f0-9-]+)", str(proc.stdout) + str(proc.stderr))
-                if job_id_match:
-                    flink_job_id = job_id_match.group(1)
-                    info += f"提取到 Flink Job ID: {flink_job_id}\n"
-                else:
-                    print_log("未从输出中找到 Flink Job ID")
-            except Exception as e:
-                print_log('获取日志出错')
-        full_cmd = ' '.join(cmd)
-        return info, flink_job_id, full_cmd
+    #     sql_client_rel = FLINK_CONFIG.get('sql_client_path')
+    #     flink_home = FLINK_CONFIG.get('flink_home')
+    #     sql_client_exec = None
+    #     if flink_home and sql_client_rel:
+    #         candidate = os.path.join(flink_home, sql_client_rel)
+    #         candidate = os.path.normpath(candidate)
+    #         if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+    #             sql_client_exec = candidate
+    #     temp_sql = None
+    #     log_dir = os.path.join(os.getcwd(), 'log/flink_job/')
+    #     os.makedirs(log_dir, exist_ok=True)
+    #     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    #     filename = f"{job_name}_{timestamp}.sql"
+    #     temp_sql = os.path.join(log_dir, filename)
+    #     with open(temp_sql, 'w', encoding='utf-8') as f:
+    #         f.write(result)
+    #     if sql_client_exec is None:
+    #         sql_client_exec = 'not flink'
+    #     cmd = [sql_client_exec, '-f', temp_sql]
+    #     print("执行命令: " + ' '.join(cmd))
+    #     flink_job_id = 'init'
+    #     if self.__mode == 'prod':
+    #         proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    #         info+="执行命令: " + ' '.join(cmd) + '\n'
+    #         info+="stdout: " + proc.stderr+ '\n'
+    #         print(info)
+    #         try:
+    #             job_id_match = re.search(r"Job ID:\s+([a-f0-9-]+)", str(proc.stdout) + str(proc.stderr))
+    #             if job_id_match:
+    #                 flink_job_id = job_id_match.group(1)
+    #                 info += f"提取到 Flink Job ID: {flink_job_id}\n"
+    #             else:
+    #                 print("未从输出中找到 Flink Job ID")
+    #         except Exception as e:
+    #             print('获取日志出错')
+    #     full_cmd = ' '.join(cmd)
+    #     return info, flink_job_id, full_cmd
 
-    def __exe_flink(self):
-        e_log = {}
-        for j in self.job_list:
-            sub_log = []
-            if len(self.param_list)>0 and self.param_list[0] != {}:
-                flink_param = self.param_list
-            elif int(j['param_server_id'])!=0:
-                flink_param = repo.get_job_param(server_id=str(j['param_server_id']),db_name=j['param_db_name'],sql_text=j['param_sql'])
-            for p in flink_param:
-                info, flink_job_id, cmd = self.__submit_flink(job_sql=j['job_sql'], params=p)
-                try:
-                    flink_log_id = str(time.time_ns())
-                    repo.register_flink_job(id=flink_log_id,job_id=str(self.job_id),job_template_id=str(j['id']),flink_job_id=flink_job_id,submit_cmd=cmd)
-                except Exception as e:
-                    sub_log.append({'status': 'flink追踪日志出错', 'message': str(e)})
-                if self.job_log:
-                    try:
-                        sub_log.extend({'result':info})
-                    except Exception as e:
-                        print_log(e)
-                        sub_log.append({'status': '日志收集出错', 'message': str(e)})
-            e_log[j['id']] = sub_log
-        # 启动跟踪flink任务
-        repo.register_flink_tracking()
-        return e_log
+    # def __exe_flink(self):
+    #     e_log = {}
+    #     for j in self.job_list:
+    #         sub_log = []
+    #         if len(self.param_list)>0 and self.param_list[0] != {}:
+    #             flink_param = self.param_list
+    #         elif int(j['param_server_id'])!=0:
+    #             flink_param = repo.get_job_param(server_id=str(j['param_server_id']),db_name=j['param_db_name'],sql_text=j['param_sql'])
+    #         for p in flink_param:
+    #             info, flink_job_id, cmd = self.__submit_flink(job_sql=j['job_sql'], params=p)
+    #             try:
+    #                 flink_log_id = str(time.time_ns())
+    #                 repo.register_flink_job(id=flink_log_id,job_id=str(self.job_id),job_template_id=str(j['id']),flink_job_id=flink_job_id,submit_cmd=cmd)
+    #             except Exception as e:
+    #                 sub_log.append({'status': 'flink追踪日志出错', 'message': str(e)})
+    #             if self.job_log:
+    #                 try:
+    #                     sub_log.extend({'result':info})
+    #                 except Exception as e:
+    #                     print(e)
+    #                     sub_log.append({'status': '日志收集出错', 'message': str(e)})
+    #         e_log[j['id']] = sub_log
+    #     # 启动跟踪flink任务
+    #     repo.register_flink_tracking()
+    #     return e_log
 
     def __exe(self):
         if self.job_type == 'py':
