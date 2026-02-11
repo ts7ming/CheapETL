@@ -42,11 +42,10 @@ CREATE TABLE `etl_job_sync`  (
   `from_server_id` int NULL DEFAULT NULL COMMENT '来源服务器',
   `from_db_name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '来源数据库',
   `from_sql` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL COMMENT '取数SQL',
+  `before_write` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL COMMENT '写入前执行',
   `to_server_id` int NOT NULL COMMENT '目标服务器',
   `to_db_name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '目标数据库',
   `to_table` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '目标表名',
-  `before_write` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL COMMENT '写入前执行',
-  `note` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '备注',
   `to_columns` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL COMMENT '目标字段(逗号分隔,不带空格)',
   `after_write` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL COMMENT '写入完成后执行',
   `last_execution_time` datetime NULL DEFAULT NULL COMMENT '上次执行时间'
@@ -75,7 +74,6 @@ CREATE TABLE `etl_log`  (
 DROP TABLE IF EXISTS `etl_server`;
 CREATE TABLE `etl_server`  (
   `server_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `server_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '名称',
   `conn_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '连接类型(sqlite,mysql,mssql,oracle,pgsql,clickhouse)',
   `host` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
   `username` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,

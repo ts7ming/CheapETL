@@ -4,7 +4,7 @@ import re
 import subprocess
 import time
 import os
-from settings import WORK_DIR, DATAX_PY, PY_PATH, DATABASES
+from config import WORK_DIR, DATAX_PY, PY_PATH, DATABASES
 from models import Repo as repo
 # from pyqueen import DataSource
 # from datetime import datetime

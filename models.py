@@ -2,7 +2,7 @@ from pyqueen import DataSource, TimeKit, Dingtalk
 import time
 
 import requests
-from settings import DS_CONFIG, DATABASES
+from config import DS_CONFIG, DATABASES
 
 ds = DataSource(**DS_CONFIG)
 
