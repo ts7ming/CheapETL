@@ -37,3 +37,6 @@
     - param是指定参数, 优先级高于 `etl_job_sync.param_sql`
 - 例如: `python3 /app/CheapETL/sync_datax.py 2001`
 - 例如: `python3 /app/CheapETL/sync.py 2002 --start_date "$(date -d '-1 day' +%Y-%m-%d)" --end_date "$(date +%Y-%m-%d)"`
+
+#### 6. 执行SQL任务
+- 待整理
