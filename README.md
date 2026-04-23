@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/logo.jpg" alt="Logo">
+</div>
+
 ## 吐槽
 ##### 搜索「如何搭建 ETL」
 - X 云：一键部署 XXX 方案（需购买至少 3 台云主机, 绑定 5 个云产品）
