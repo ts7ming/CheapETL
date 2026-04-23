@@ -3,7 +3,7 @@ import re
 import subprocess
 import time
 import os
-from settings import WORK_DIR, DATAX_PY, PY_PATH
+from config import WORK_DIR, DATAX_PY, PY_PATH
 from core.models import Repo as repo
 
 
@@ -123,7 +123,7 @@ class JobExecutor:
                             print(f"{tmp_json_path} 删除失败")
                     else:
                         sub_log.append({'sync_param': p, 'result': 'datax执行失败' + str(process.stdout)})
-                        print(process.stdout)  # 报错写入 /log/yyyymm.log
+                        print(process.stdout)
                         raise Exception('datax执行失败')
             e_log[j['id']] = sub_log
         return e_log

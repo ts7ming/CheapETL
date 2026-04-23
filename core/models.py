@@ -1,7 +1,8 @@
 from pyqueen import DataSource, TimeKit, Dingtalk
 import time
 import re
-from settings import (
+from core.utils import parse_xxl_job
+from config import (
     ds_cfg,
     DATABASES,
     ADMIN_ROBOT,
@@ -10,7 +11,8 @@ from settings import (
     T_CHECK,
     T_SYNC,
     T_SQL,
-    T_MESSAGE
+    T_MESSAGE,
+    T_ERR_HANDLING_CFG
 )
 
 ds = ds_cfg
@@ -124,7 +126,7 @@ class Repo:
                 action_type,
                 action_params 
             FROM
-                etl_error_handling_config
+                {T_ERR_HANDLING_CFG}
         '''
         rule_id, action = None, None
         try:
@@ -139,21 +141,49 @@ class Repo:
             pass
         return rule_id, action
 
+
     @staticmethod
-    def admin_msg(text):
-        time.sleep(1)
-        ding = Dingtalk(**ROBOTS['2001'])
-        ding.send_markdown(title='', text=text)
+    def get_xxl_job_conf():
+        try:
+            from config import XXL_JOB_DB_ID
+        except:
+            print('没有配置 settings.XXL_JOB_DB_ID')
+            return None
+        if XXL_JOB_DB_ID is None or XXL_JOB_DB_ID not in DATABASES:
+            return None
+        ds_xj = DataSource(**DATABASES[XXL_JOB_DB_ID])
+        sql = '''
+            SELECT id, child_jobid, schedule_conf,glue_source,job_desc
+            FROM xxl_job.xxl_job_info
+        '''
+        df = ds_xj.read_sql(sql)
+        return df
 
     @staticmethod
     def admin_err(xxl_job_id, job_id, job_type, err_msg):
+        err = f'**任务类型**: {job_type}'
+
         time.sleep(1)
         rule_id, action = Repo.get_error_handle(err_msg)
-
-        err = f'**任务类型**: {job_type}'
-        err += f'\n\n**xxl_job_id**: {xxl_job_id}'
+        info = {}
+        if xxl_job_id is not None:
+            try:
+                info = parse_xxl_job(df=Repo.get_xxl_job_conf(), xxl_job_id=str(xxl_job_id))
+                err += f'\n\n**xxl_job_id**: {xxl_job_id}'
+            except:
+                print('解析xxl-job依赖出错')
         err += f'\n\n**job_id**: {job_id}'
+        if 'job_desc' in info:
+            job_desc = info['job_desc']
+            err += f'\n\n**任务名称**: {job_desc}'
 
+        if 'job_tracking' in info:
+            job_tracking = ' <- '.join(info['job_tracking'])
+            err += f'\n\n**任务调用链**: {job_tracking}'
+
+        if 'next_time' in info:
+            next_time = info['next_time']
+            err += f'\n\n**下次执行时间**: {next_time}'
         if rule_id is not None:
             err += f'\n\n**报错匹配**: 规则({rule_id}) {action}'
             err_msg = err_msg[0:20] + '...'
