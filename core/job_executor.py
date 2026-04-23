@@ -8,16 +8,16 @@ from core.models import Repo as repo
 
 
 class JobExecutor:
-    def __init__(self, job_id, job_type, job_template, run_params, job_log):
+    def __init__(self, job_id, job_type, run_params, job_log):
         self.__mode = 'prod'
         self.job_id = job_id
         self.job_type = job_type
         if job_type == 'check':
-            self.job_list = repo.get_check_job(id_list_str=job_template)
+            self.job_list = repo.get_check_job(id_list_str=job_id)
         elif job_type in ('sync', 'sync_datax'):
-            self.job_list = repo.get_sync_job(id_list_str=job_template)
+            self.job_list = repo.get_sync_job(id_list_str=job_id)
         elif job_type == 'sql':
-            self.job_list = repo.get_sql_job(id_list_str=job_template)
+            self.job_list = repo.get_sql_job(id_list_str=job_id)
         else:
             raise Exception('无效作业类型')
         self.param_list = self.__parse_param(run_params)

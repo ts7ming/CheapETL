@@ -11,7 +11,7 @@ except:
 
 if ds_cfg is not None:
     tmp_db = {}
-    sql = f'select server_id,conn_type,host,username,password,port,db_name from etl_servers'
+    sql = f'select server_id,conn_type,host,username,password,port,db_name from etl_server'
     df = ds_cfg.read_sql(sql)
     for server_id, conn_type, host, username, password, port, db_name in df.values:
         if str(server_id) not in DATABASES:

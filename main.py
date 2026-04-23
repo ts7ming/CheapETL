@@ -1,7 +1,7 @@
 import json
 import time
 from core.job_executor import JobExecutor
-from core import repo
+from core.models import Repo as repo
 import logging
 import argparse
 
