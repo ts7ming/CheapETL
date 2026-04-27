@@ -12,13 +12,23 @@ from config import (
     T_SYNC,
     T_SQL,
     T_MESSAGE,
-    T_ERR_HANDLING_CFG
+    T_ERR_HANDLING_CFG,
+    T_IO_LOG
 )
 
 ds = ds_cfg
 
 
 class Repo:
+    @staticmethod
+    def get_ds(server_id):
+        tmp = DATABASES[str(server_id)]
+        tmp['server_id'] = str(server_id)
+        r_ds = DataSource(**tmp)
+        r_ds.set_logger(logger='db',log_ds=ds, log_tb=T_IO_LOG,server_id = str(server_id))
+        return r_ds
+
+
     @staticmethod
     def get_datax_reader(server_id, db_name, sql):
         server_cfg = DATABASES[str(server_id)]
@@ -119,7 +129,7 @@ class Repo:
 
     @staticmethod
     def get_error_handle(err_msg):
-        sql = '''
+        sql = f'''
             SELECT
                 id,
                 error_pattern,
